@@ -1,0 +1,16 @@
+# Code 2: a map declaration, an array of 256 `long`s indexed by `u32`.
+#
+# The article declares the map only; to have it in the object (and to test
+# it), this program counts every packet in entry 0 and passes it.
+from std.net import XdpContext, XdpAction
+
+map mapname: Array[i64, 256]
+
+@xdp
+def count(ctx: XdpContext) -> XdpAction:
+    match mapname.get(0):
+        case Some(n):
+            n += 1
+        case None:
+            pass
+    return XdpAction.PASS

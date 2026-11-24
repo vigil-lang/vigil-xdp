@@ -1,0 +1,27 @@
+# Code 1: the classic BPF filter for "ip and tcp", as an XDP program.
+#
+#     load 2 bytes @ [12]; jump equal #0x800  (EtherType IPv4)
+#     load 1 byte @ [23];  jump equal #6      (IPv4 protocol TCP)
+#     return #-1 (accept)  /  return #0 (reject)
+#
+# Accepting is XDP_PASS and rejecting XDP_DROP. A load past the end of the
+# packet ends a classic BPF program with 0, so a packet too short for
+# either load is dropped too. Unlike Code 4, the offsets are fixed: no IP
+# header is parsed, only the byte at 23.
+from std.net import XdpContext, XdpAction, EthHdr, Byte, ETH_P_IP, IPPROTO_TCP
+
+@xdp
+def ip_tcp(ctx: XdpContext) -> XdpAction:
+    match ctx.parse[EthHdr](0):     # the 2 bytes at 12 are its `proto`
+        case Some(eth):
+            if eth.proto != ETH_P_IP:
+                return XdpAction.DROP
+        case None:
+            return XdpAction.DROP
+    match ctx.parse[Byte](23):
+        case Some(protocol):
+            if protocol.value == IPPROTO_TCP:
+                return XdpAction.PASS
+            return XdpAction.DROP
+        case None:
+            return XdpAction.DROP

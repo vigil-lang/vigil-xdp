@@ -1,0 +1,12 @@
+# Figure 3 ("dropworld"): the basic structure of an eBPF program, an XDP
+# program that drops every packet.
+#
+# In Vigil the program is a function marked `@xdp`: the decorator gives the
+# ELF section and the program type, and `XdpContext` is the `struct xdp_md`
+# of the C version. The result is the two instructions of the article,
+# `r0 = 1; exit`.
+from std.net import XdpContext, XdpAction
+
+@xdp
+def drop(ctx: XdpContext) -> XdpAction:
+    return XdpAction.DROP

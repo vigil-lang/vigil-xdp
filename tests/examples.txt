@@ -1,0 +1,14 @@
+# The examples of the differential test, one per line:
+#
+#   NAME  C_PROGRAMS  VIGIL_PROGRAMS  MAPS  KEY_SWAP
+#
+# The programs are PROG:TYPE separated by commas, in the order each packet
+# goes through them; MAPS are the maps compared (`-` for none); KEY_SWAP
+# names the maps whose Vigil keys hold IPv4 addresses in host order, so
+# that the bytes of each 32-bit word are reversed before comparing (`-`).
+dropworld  drop:xdp                    drop:xdp                    -         -
+ip_tcp     ip_tcp:xdp                  ip_tcp:xdp                  -         -
+map_decl   count:xdp                   count:xdp                   mapname   -
+is_tcp     isTCP:xdp                   is_tcp:xdp                  -         -
+xdp1       xdp_prog1:xdp               xdp_prog1:xdp               rxcnt     -
+tracker    track_rx:xdp,track_tx:tc    track_rx:xdp,track_tx:tc    trackers  trackers

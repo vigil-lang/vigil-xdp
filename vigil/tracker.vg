@@ -1,0 +1,67 @@
+# § 5.3: XDP and TC working together. `track_rx` (XDP, received packets)
+# and `track_tx` (TC egress, sent packets) count the packets and bytes
+# exchanged with each pair of IPv4 addresses in one hash map, `trackers`.
+#
+# The two programs are in the same object and use the same map, as the
+# `PIN_GLOBAL_NS` pinning of the article arranges with iproute2; to share
+# it between separately loaded objects, the loader pins it.
+#
+# Differences from the C version, none visible in the verdicts:
+# - the addresses of `Pair` are in host order, as Vigil reads header
+#   fields; the C version stores them as they are in the packet. Userspace
+#   (and the test harness) swaps the bytes of each address to compare.
+# - a new entry is written with `insert` (BPF_ANY) after a failed lookup;
+#   the C version uses BPF_NOEXIST. The result differs only if another CPU
+#   adds the same pair between the two calls.
+from std.net import XdpContext, XdpAction, TcContext, TcAction, EthHdr, Ipv4Hdr, ETH_HLEN, ETH_P_IP
+
+struct Pair:
+    lip: u32    # local IP
+    rip: u32    # remote IP
+
+struct Stats:
+    tx_cnt: u64
+    rx_cnt: u64
+    tx_bytes: u64
+    rx_bytes: u64
+
+map trackers: Hash[Pair, Stats](max_entries=2048)
+
+# On RX the destination is the local address; on TX, the source.
+def pair_of(is_rx: bool, ip: Ipv4Hdr) -> Pair:
+    if is_rx:
+        return Pair(ip.daddr, ip.saddr)
+    return Pair(ip.saddr, ip.daddr)
+
+def update_stats(is_rx: bool, key: Pair, bytes: u64):
+    match trackers.get(key):
+        case Some(stats):
+            if is_rx:
+                stats.rx_cnt += 1
+                stats.rx_bytes += bytes
+            else:
+                stats.tx_cnt += 1
+                stats.tx_bytes += bytes
+        case None:
+            if is_rx:
+                trackers.insert(key, Stats(0, 1, 0, bytes))
+            else:
+                trackers.insert(key, Stats(1, 0, bytes, 0))
+
+@xdp
+def track_rx(ctx: XdpContext) -> XdpAction:
+    eth = ctx.parse[EthHdr](0)?             # not IPv4: XDP_PASS
+    if eth.proto != ETH_P_IP:
+        return XdpAction.PASS
+    ip = ctx.parse[Ipv4Hdr](ETH_HLEN)?
+    update_stats(True, pair_of(True, ip), u64(ctx.len()))
+    return XdpAction.PASS
+
+@tc(direction="egress")
+def track_tx(ctx: TcContext) -> TcAction:
+    eth = ctx.parse[EthHdr](0)?             # not IPv4: TC_ACT_OK
+    if eth.proto != ETH_P_IP:
+        return TcAction.OK
+    ip = ctx.parse[Ipv4Hdr](ETH_HLEN)?
+    update_stats(False, pair_of(False, ip), u64(ctx.len()))
+    return TcAction.OK

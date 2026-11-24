@@ -1,0 +1,73 @@
+# § 5.2.1: xdp1 of the kernel's samples/bpf (xdp1_kern.c). Counts the
+# packets of each IP protocol in a per-CPU array and drops every packet.
+#
+# Up to two VLAN tags (802.1Q or 802.1ad) are skipped. The protocol is the
+# IPv4 `protocol` or the IPv6 `nexthdr`, and 0 for anything else or for a
+# truncated IP header. The user-space part of the sample (xdp1_user.c)
+# reads `rxcnt` by name and sums the values of the CPUs; it works with this
+# object unchanged.
+from std.net import XdpContext, XdpAction, EthHdr, Ipv4Hdr, Ipv6Hdr, ETH_HLEN, ETH_P_IP, ETH_P_IPV6
+
+const ETH_P_8021Q: u16 = 0x8100
+const ETH_P_8021AD: u16 = 0x88A8
+
+# struct vlan_hdr of linux/if_vlan.h
+@network_order
+struct VlanHdr:
+    tci: u16
+    encapsulated_proto: u16
+
+const VLAN_HLEN: u32 = 4
+
+map rxcnt: PerCpuArray[i64, 256]
+
+def parse_ipv4(ctx: XdpContext, nh_off: u32) -> u32:
+    match ctx.parse[Ipv4Hdr](nh_off):
+        case Some(iph):
+            return u32(iph.protocol)
+        case None:
+            return 0
+
+def parse_ipv6(ctx: XdpContext, nh_off: u32) -> u32:
+    match ctx.parse[Ipv6Hdr](nh_off):
+        case Some(ip6h):
+            return u32(ip6h.nexthdr)
+        case None:
+            return 0
+
+def is_vlan(h_proto: u16) -> bool:
+    return h_proto == ETH_P_8021Q or h_proto == ETH_P_8021AD
+
+@xdp
+def xdp_prog1(ctx: XdpContext) -> XdpAction:
+    rc = XdpAction.DROP
+    nh_off = ETH_HLEN
+    h_proto: u16 = 0
+    match ctx.parse[EthHdr](0):
+        case Some(eth):
+            h_proto = eth.proto
+        case None:
+            return rc
+
+    # two tags at most, as the two copies of the block in the C version
+    for _ in range(2):
+        if is_vlan(h_proto):
+            match ctx.parse[VlanHdr](nh_off):
+                case Some(vhdr):
+                    h_proto = vhdr.encapsulated_proto
+                    nh_off += VLAN_HLEN
+                case None:
+                    return rc
+
+    ipproto: u32 = 0
+    if h_proto == ETH_P_IP:
+        ipproto = parse_ipv4(ctx, nh_off)
+    elif h_proto == ETH_P_IPV6:
+        ipproto = parse_ipv6(ctx, nh_off)
+
+    match rxcnt.get(ipproto):
+        case Some(value):
+            value += 1
+        case None:
+            pass
+    return rc

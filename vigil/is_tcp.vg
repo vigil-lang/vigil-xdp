@@ -1,0 +1,17 @@
+# Code 4 (§ 5.1): pass IPv4 TCP segments, drop everything else.
+#
+# `ctx.parse[H](offset)` is the bounds check of lines 14 and 21 and the
+# cast of lines 11 and 19 in one: it gives the header, or `None` when the
+# packet is too short, and `?` then returns the default verdict of an XDP
+# program, XDP_PASS, as lines 15 and 22 do. Header fields are read in host
+# order, so the EtherType is compared with 0x0800 without `bpf_htons`.
+from std.net import XdpContext, XdpAction, EthHdr, Ipv4Hdr, ETH_HLEN, ETH_P_IP, IPPROTO_TCP
+
+@xdp
+def is_tcp(ctx: XdpContext) -> XdpAction:
+    eth = ctx.parse[EthHdr](0)?             # too short: XDP_PASS
+    if eth.proto == ETH_P_IP:
+        ipv4 = ctx.parse[Ipv4Hdr](ETH_HLEN)?  # too short: XDP_PASS
+        if ipv4.protocol == IPPROTO_TCP:
+            return XdpAction.PASS
+    return XdpAction.DROP
